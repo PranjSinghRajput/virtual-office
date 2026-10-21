@@ -12,7 +12,7 @@ Most remote tools rely on scheduled calls. Virtual Office recreates the spontane
 
 - [x] Real-time messaging between connected clients (Socket.io)
 - [x] 2D office map with avatar movement (Phaser.js)
-- [ ] Live multi-user position sync
+- [x] Live multi-user position sync
 - [ ] Proximity-based video and audio when entering a cabin (WebRTC)
 - [ ] Meeting rooms with invite-only access
 - [ ] Presence tracking for remote employees
