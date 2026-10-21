@@ -4,12 +4,21 @@
   <meta charset="UTF-8">
   <title>Virtual Office</title>
   <style>
-    body { margin: 0; background: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    body {
+      margin: 0;
+      background: #0f172a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
   </style>
 </head>
 <body>
   <div id="game"></div>
+
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
