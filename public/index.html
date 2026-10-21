@@ -1,22 +1,15 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <meta charset="UTF-8">
+  <title>Virtual Office</title>
+  <style>
+    body { margin: 0; background: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  </style>
+</head>
 <body>
-  <h2>Hello Office</h2>
-  <input id="msg" placeholder="Type something">
-  <button onclick="send()">Send</button>
-  <ul id="list"></ul>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
-    function send() {
-      socket.emit('chat', document.getElementById('msg').value);
-    }
-    socket.on('chat', (msg) => {
-      const li = document.createElement('li');
-      li.textContent = msg;
-      document.getElementById('list').appendChild(li);
-    });
-  </script>
+  <div id="game"></div>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h2>Hello Office</h2>
+  <input id="msg" placeholder="Type something">
+  <button onclick="send()">Send</button>
+  <ul id="list"></ul>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    function send() {
+      socket.emit('chat', document.getElementById('msg').value);
+    }
+    socket.on('chat', (msg) => {
+      const li = document.createElement('li');
+      li.textContent = msg;
+      document.getElementById('list').appendChild(li);
+    });
+  </script>
+</body>
+</html>
