@@ -12,13 +12,29 @@
       align-items: center;
       height: 100vh;
     }
+    #call {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #call video {
+      width: 220px;
+      border-radius: 10px;
+      background: #000;
+    }
   </style>
 </head>
 <body>
   <div id="game"></div>
+  <div id="call"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

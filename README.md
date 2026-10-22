@@ -36,3 +36,4 @@ Open http://localhost:3000 in two browser tabs to see real-time messaging in act
 ## Author
 
 Pranjali Singh
+© 2026 Pranjali Singh. All rights reserved.
