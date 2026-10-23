@@ -9,10 +9,23 @@ const WALL = 10;
 const DOOR = 60;
 const SPEED = 200;
 
-// NEW: testing ke liye: localhost:3000/?cam=off&mic=off
+// Testing ke liye: localhost:3000/?name=Ravi&cam=off&mic=off
 const params = new URLSearchParams(location.search);
 const WANT_CAM = params.get('cam') !== 'off';
 const WANT_MIC = params.get('mic') !== 'off';
+const myName =
+  (params.get('name') || prompt('Enter your name (shown above your avatar):') || 'Guest')
+    .trim()
+    .slice(0, 20) || 'Guest';
+
+const $ = (id) => document.getElementById(id);
+
+let socket = null;
+let activeCabin = null;
+let roster = [];
+let meetingState = { active: false };
+let meetingLabel = null;
+let noticeTimer = null;
 
 const config = {
   type: Phaser.AUTO,
@@ -38,58 +51,87 @@ function create() {
   this.player = this.physics.add.sprite(400, 420, 'avatar');
   this.player.setCollideWorldBounds(true);
   this.walls.forEach((wall) => this.physics.add.collider(this.player, wall));
+  this.myLabel = makeLabel(this, myName);
 
-  this.cursors = this.input.keyboard.createCursorKeys();
-  this.keys = this.input.keyboard.addKeys('W,A,S,D');
+  // false = browser ke typing ko rokna nahi (title likhte waqt space/letters chalein)
+  this.keys = this.input.keyboard.addKeys(
+    { up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT', w: 'W', a: 'A', s: 'S', d: 'D' },
+    false
+  );
 
   this.add.text(16, 540, 'Use arrow keys or WASD to move', { fontSize: '14px', color: '#475569' });
   this.statusText = this.add.text(16, 565, '', { fontSize: '18px', color: '#0f172a', fontStyle: 'bold' });
 
-  this.socket = io();
   this.others = {};
   this.lastSent = { x: 0, y: 0 };
+  this.candidateCabin = null;
+  this.candidateSince = 0;
 
-  this.socket.on('currentPlayers', (players) => {
+  // Socket yahin banta hai taaki koi event miss na ho
+  socket = io({ auth: { name: myName } });
+
+  socket.on('currentPlayers', (players) => {
     Object.keys(players).forEach((id) => {
-      if (id === scene.socket.id) {
-        scene.player.setPosition(players[id].x, players[id].y);
-      } else {
-        addOther(scene, players[id]);
-      }
+      if (id === socket.id) scene.player.setPosition(players[id].x, players[id].y);
+      else addOther(scene, players[id]);
     });
   });
-  this.socket.on('newPlayer', (info) => addOther(scene, info));
-  this.socket.on('playerMoved', (info) => {
-    const other = scene.others[info.id];
-    if (other) other.setPosition(info.x, info.y);
+  socket.on('newPlayer', (info) => addOther(scene, info));
+  socket.on('playerMoved', (info) => {
+    const o = scene.others[info.id];
+    if (o) {
+      o.img.setPosition(info.x, info.y);
+      o.label.setPosition(info.x, info.y - 26);
+    }
   });
-  this.socket.on('playerLeft', (id) => {
-    if (scene.others[id]) {
-      scene.others[id].destroy();
+  socket.on('playerLeft', (id) => {
+    const o = scene.others[id];
+    if (o) {
+      o.img.destroy();
+      o.label.destroy();
       delete scene.others[id];
     }
   });
 
-  // NEW: cabin badalne par call ka hisaab
-  this.candidateCabin = null;
-  this.activeCabin = null;
-  this.candidateSince = 0;
+  socket.on('roster', (list) => {
+    roster = list;
+    renderInviteList();
+  });
+  socket.on('meetingStatus', (s) => {
+    meetingState = s;
+    renderMeetingStatus();
+  });
+  socket.on('meetingInvite', (inv) => {
+    showNotice(inv.hostName + ' invited you to "' + inv.title + '". Walk into the Meeting Room to join.');
+    if (activeCabin === 'meeting') onCabinChange('meeting'); // pehle se andar khade the to dobara try
+  });
+  socket.on('meetingEnded', () => {
+    showNotice('The meeting has ended.');
+    if (activeCabin === 'meeting') leaveCall();
+  });
+
+  setupPanel();
 }
 
 function update() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+
   let dx = 0;
   let dy = 0;
-
-  if (this.cursors.left.isDown || this.keys.A.isDown) dx = -1;
-  else if (this.cursors.right.isDown || this.keys.D.isDown) dx = 1;
-
-  if (this.cursors.up.isDown || this.keys.W.isDown) dy = -1;
-  else if (this.cursors.down.isDown || this.keys.S.isDown) dy = 1;
+  if (!typing) {
+    if (this.keys.left.isDown || this.keys.a.isDown) dx = -1;
+    else if (this.keys.right.isDown || this.keys.d.isDown) dx = 1;
+    if (this.keys.up.isDown || this.keys.w.isDown) dy = -1;
+    else if (this.keys.down.isDown || this.keys.s.isDown) dy = 1;
+  }
 
   const v = new Phaser.Math.Vector2(dx, dy).normalize().scale(SPEED);
   this.player.setVelocity(v.x, v.y);
 
   const p = this.player;
+  this.myLabel.setPosition(p.x, p.y - 26);
+
   const inside = CABINS.find(
     (c) =>
       p.x > c.x + WALL && p.x < c.x + CABIN_W - WALL &&
@@ -99,32 +141,94 @@ function update() {
 
   const x = Math.round(p.x);
   const y = Math.round(p.y);
-  if (x !== this.lastSent.x || y !== this.lastSent.y) {
-    this.socket.emit('playerMove', { x, y });
+  if (socket && (x !== this.lastSent.x || y !== this.lastSent.y)) {
+    socket.emit('playerMove', { x, y });
     this.lastSent = { x, y };
   }
 
-  // NEW: 0.5 second tak ek hi jagah rukne par hi call badlo
+  // 0.5 second ek hi jagah rukne par hi call badlo
   const insideId = inside ? inside.id : null;
   if (insideId !== this.candidateCabin) {
     this.candidateCabin = insideId;
     this.candidateSince = this.time.now;
-  } else if (
-    this.candidateCabin !== this.activeCabin &&
-    this.time.now - this.candidateSince > 500
-  ) {
-    this.activeCabin = this.candidateCabin;
-    onCabinChange(this.socket, this.activeCabin);
+  } else if (this.candidateCabin !== activeCabin && this.time.now - this.candidateSince > 500) {
+    activeCabin = this.candidateCabin;
+    onCabinChange(activeCabin);
   }
 }
 
-// ---------- NEW: Video call (LiveKit) ----------
+// ---------- Meeting panel ----------
+function setupPanel() {
+  $('newMeetingBtn').onclick = () => {
+    $('meetingForm').hidden = !$('meetingForm').hidden;
+    renderInviteList();
+  };
+
+  $('meetingForm').onsubmit = (e) => {
+    e.preventDefault();
+    const title = $('meetingTitle').value.trim();
+    if (!title) return showNotice('Please enter a meeting title');
+    const invited = [...$('inviteList').querySelectorAll('input:checked')].map((i) => i.value);
+
+    socket.emit('createMeeting', { title, invited }, (res) => {
+      if (res && res.error) return showNotice(res.error);
+      showNotice('Meeting created. Invited people have been notified.');
+      $('meetingForm').hidden = true;
+      $('meetingTitle').value = '';
+      if (activeCabin === 'meeting') onCabinChange('meeting'); // host pehle se andar hai to join karao
+    });
+  };
+
+  $('endMeetingBtn').onclick = () => socket.emit('endMeeting');
+}
+
+function renderInviteList() {
+  const box = $('inviteList');
+  const checked = new Set([...box.querySelectorAll('input:checked')].map((i) => i.value));
+  box.innerHTML = '';
+
+  const others = roster.filter((p) => p.id !== socket.id);
+  if (others.length === 0) {
+    box.textContent = 'No one else is online yet. Open a second window to test.';
+    return;
+  }
+  others.forEach((p) => {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = p.id;
+    cb.checked = checked.has(p.id);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(' ' + p.name)); // textNode: naam se HTML nahi chalega
+    box.appendChild(label);
+  });
+}
+
+function renderMeetingStatus() {
+  const mine = meetingState.active && meetingState.hostId === socket.id;
+  $('meetingStatus').textContent = meetingState.active
+    ? 'Meeting Room: "' + meetingState.title + '" hosted by ' + meetingState.hostName + ' (invite-only)'
+    : 'Meeting Room: free';
+  $('endMeetingBtn').hidden = !mine;
+  $('newMeetingBtn').hidden = meetingState.active && !mine;
+  if (meetingLabel) meetingLabel.setText(meetingState.active ? 'Meeting Room [in session]' : 'Meeting Room');
+}
+
+function showNotice(text) {
+  const el = $('notice');
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { el.hidden = true; }, 5000);
+}
+
+// ---------- Video call (LiveKit) ----------
 let callRoom = null;
 let callSeq = 0;
 
-function onCabinChange(socket, cabinId) {
+function onCabinChange(cabinId) {
   leaveCall().then(() => {
-    if (cabinId) joinCall(socket);
+    if (cabinId) joinCall();
   });
 }
 
@@ -135,18 +239,18 @@ async function leaveCall() {
     callRoom = null;
     try { await r.disconnect(); } catch (e) { /* ignore */ }
   }
-  document.getElementById('call').innerHTML = '';
+  $('call').innerHTML = '';
 }
 
-async function joinCall(socket) {
+async function joinCall() {
   const mySeq = ++callSeq;
   const { Room, RoomEvent, Track } = LivekitClient;
 
-  // Server se pass maango
   const res = await new Promise((resolve) => socket.emit('joinCabinCall', resolve));
-  if (mySeq !== callSeq) return;            // player tab tak aage nikal gaya
+  if (mySeq !== callSeq) return;
   if (!res || res.error) {
     console.log('Call not started:', res && res.error);
+    if (res && res.error) showNotice(res.error);
     return;
   }
 
@@ -155,7 +259,7 @@ async function joinCall(socket) {
 
   room.on(RoomEvent.TrackSubscribed, (track) => {
     if (track.kind === Track.Kind.Video || track.kind === Track.Kind.Audio) {
-      document.getElementById('call').appendChild(track.attach());
+      $('call').appendChild(track.attach());
     }
   });
   room.on(RoomEvent.TrackUnsubscribed, (track) => {
@@ -178,15 +282,25 @@ async function joinCall(socket) {
   if (WANT_CAM) {
     try {
       const pub = await room.localParticipant.setCameraEnabled(true);
-      if (pub && pub.track) document.getElementById('call').appendChild(pub.track.attach());
+      if (pub && pub.track) $('call').appendChild(pub.track.attach());
     } catch (e) { console.warn('Camera failed:', e); }
   }
 }
-// ------------------------------------------------
 
+// ---------- Helpers ----------
 function addOther(scene, info) {
   if (scene.others[info.id]) return;
-  scene.others[info.id] = scene.add.image(info.x, info.y, 'avatarOther');
+  scene.others[info.id] = {
+    img: scene.add.image(info.x, info.y, 'avatarOther'),
+    label: makeLabel(scene, info.name).setPosition(info.x, info.y - 26),
+  };
+}
+
+function makeLabel(scene, text) {
+  return scene.add
+    .text(0, 0, text, { fontSize: '12px', color: '#0f172a', fontStyle: 'bold' })
+    .setOrigin(0.5)
+    .setDepth(10);
 }
 
 function makeAvatarTexture(scene, key, color) {
@@ -202,7 +316,8 @@ function makeCabin(scene, cabin) {
   const doorStart = (CABIN_W - DOOR) / 2;
 
   scene.add.rectangle(x + CABIN_W / 2, y + CABIN_H / 2, CABIN_W, CABIN_H, cabin.color);
-  scene.add.text(x + 16, y + 18, cabin.name, { fontSize: '16px', color: '#0f172a', fontStyle: 'bold' });
+  const title = scene.add.text(x + 16, y + 18, cabin.name, { fontSize: '16px', color: '#0f172a', fontStyle: 'bold' });
+  if (cabin.id === 'meeting') meetingLabel = title;
 
   addWall(scene, x, y, CABIN_W, WALL);
   addWall(scene, x, y, WALL, CABIN_H);

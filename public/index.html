@@ -21,16 +21,64 @@
       flex-direction: column;
       gap: 8px;
     }
-    #call video {
-      width: 220px;
+    #call video { width: 220px; border-radius: 10px; background: #000; }
+    #panel {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      width: 240px;
+      padding: 12px;
+      background: #1e293b;
+      color: #e2e8f0;
       border-radius: 10px;
-      background: #000;
+      font: 14px sans-serif;
+    }
+    #panel button {
+      margin: 8px 6px 0 0;
+      padding: 6px 10px;
+      border: 0;
+      border-radius: 6px;
+      background: #4f46e5;
+      color: #fff;
+      cursor: pointer;
+    }
+    #panel input[type=text] {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 8px;
+      padding: 6px;
+    }
+    #inviteList label { display: block; margin: 4px 0; }
+    #notice {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: 80%;
+      padding: 10px 16px;
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      font: 14px sans-serif;
     }
   </style>
 </head>
 <body>
   <div id="game"></div>
   <div id="call"></div>
+
+  <div id="panel">
+    <div id="meetingStatus">Meeting Room: free</div>
+    <button id="newMeetingBtn" type="button">New meeting</button>
+    <button id="endMeetingBtn" type="button" hidden>End meeting</button>
+    <form id="meetingForm" hidden>
+      <input id="meetingTitle" type="text" placeholder="Meeting title" maxlength="40" autocomplete="off">
+      <div id="inviteList"></div>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+  <div id="notice" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
