@@ -15,6 +15,7 @@ Most remote tools rely on scheduled calls. Virtual Office recreates the spontane
 - [x] Live multi-user position sync
 - [x] Proximity-based video and audio when entering a cabin (WebRTC)
 - [x] Meeting rooms with invite-only access
+- [x] User accounts with login (MongoDB, bcrypt, JWT)
 - [ ] Presence tracking for remote employees
 - [ ] Low-bandwidth mode and AI meeting summaries
 
