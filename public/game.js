@@ -9,12 +9,12 @@ const WALL = 10;
 const DOOR = 60;
 const SPEED = 200;
 
-// Testing ke liye: localhost:3000/?cam=off&mic=off
+// Testing: localhost:3000/?cam=off&mic=off&idle=10   (idle=10 -> 10 second mein idle)
 const params = new URLSearchParams(location.search);
 const WANT_CAM = params.get('cam') !== 'off';
 const WANT_MIC = params.get('mic') !== 'off';
+const IDLE_SECONDS = Number(params.get('idle')) || 300;
 
-// Login check: token nahi hai to login page par bhejo
 const token = sessionStorage.getItem('vo_token');
 const myName = sessionStorage.getItem('vo_name');
 const LOGGED_IN = Boolean(token && myName);
@@ -28,6 +28,7 @@ let roster = [];
 let meetingState = { active: false };
 let meetingLabel = null;
 let noticeTimer = null;
+let myPresence = { state: 'offline', idle: false, reason: '' };
 
 const config = {
   type: Phaser.AUTO,
@@ -41,10 +42,38 @@ const config = {
 
 if (LOGGED_IN) new Phaser.Game(config);
 
-function logout() {
+// Soft lock: clocked in ho to logout nahi chalega (force = token kharab hone par)
+function logout(force) {
+  if (!force && myPresence.state !== 'offline') {
+    showNotice('You are clocked in. Please clock out before logging out.');
+    return;
+  }
   sessionStorage.clear();
   location.replace('/login.html');
 }
+
+// Soft lock: tab band karte waqt browser warning dega
+window.addEventListener('beforeunload', (e) => {
+  if (myPresence.state !== 'offline') {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// Idle detection: mouse/keyboard activity dekhte hain
+let lastActivity = Date.now();
+let reportedIdle = false;
+['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((ev) =>
+  window.addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true })
+);
+setInterval(() => {
+  if (!socket) return;
+  const idleNow = myPresence.state === 'working' && Date.now() - lastActivity > IDLE_SECONDS * 1000;
+  if (idleNow !== reportedIdle) {
+    reportedIdle = idleNow;
+    socket.emit('setIdle', idleNow);
+  }
+}, 1000);
 
 function create() {
   const scene = this;
@@ -73,18 +102,27 @@ function create() {
   this.candidateCabin = null;
   this.candidateSince = 0;
 
-  // Ab socket token ke saath judta hai, server database se pehchanta hai
   socket = io({ auth: { token } });
 
   socket.on('connect_error', (err) => {
     console.warn('Socket error:', err.message);
-    if (['no token', 'invalid token', 'user not found'].includes(err.message)) logout();
+    if (['no token', 'invalid token', 'user not found'].includes(err.message)) logout(true);
+  });
+
+  socket.on('me', (info) => {
+    $('adminBox').hidden = info.role !== 'admin';
   });
 
   socket.on('currentPlayers', (players) => {
     Object.keys(players).forEach((id) => {
-      if (id === socket.id) scene.player.setPosition(players[id].x, players[id].y);
-      else addOther(scene, players[id]);
+      if (id === socket.id) {
+        scene.player.setPosition(players[id].x, players[id].y);
+        myPresence = players[id].presence || myPresence;
+        applyLabel(scene.myLabel, myName, myPresence);
+        renderPresence();
+      } else {
+        addOther(scene, players[id]);
+      }
     });
   });
   socket.on('newPlayer', (info) => addOther(scene, info));
@@ -102,6 +140,23 @@ function create() {
       o.label.destroy();
       delete scene.others[id];
     }
+  });
+
+  socket.on('presenceUpdate', ({ id, presence }) => {
+    if (id === socket.id) {
+      myPresence = presence;
+      applyLabel(scene.myLabel, myName, presence);
+      renderPresence();
+    } else if (scene.others[id]) {
+      applyLabel(scene.others[id].label, scene.others[id].name, presence);
+    }
+  });
+  socket.on('presenceAlert', (a) => showNotice('Alert: ' + a.text, 10000));
+  socket.on('breakOver', () => showNotice('Your break time is over. You are marked as working again.'));
+  socket.on('replaced', () => {
+    myPresence = { state: 'offline', idle: false, reason: '' };
+    leaveCall();
+    showNotice('You opened the office in another tab, so this tab has been disconnected.', 600000);
   });
 
   socket.on('roster', (list) => {
@@ -126,7 +181,7 @@ function create() {
 
 function update() {
   const tag = document.activeElement && document.activeElement.tagName;
-  const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 
   let dx = 0;
   let dy = 0;
@@ -167,10 +222,86 @@ function update() {
   }
 }
 
-// ---------- Meeting panel ----------
+// ---------- Presence ----------
+function statusSuffix(p) {
+  if (!p || p.state === 'offline') return '';
+  if (p.state === 'break') return ' (' + p.reason.toLowerCase() + ')';
+  return p.idle ? ' (idle)' : ' \u25CF';
+}
+
+function statusColor(p) {
+  if (!p || p.state === 'offline') return '#0f172a';
+  if (p.state === 'break') return '#c2410c';
+  return p.idle ? '#64748b' : '#15803d';
+}
+
+function applyLabel(label, name, p) {
+  label.setText(name + statusSuffix(p));
+  label.setColor(statusColor(p));
+}
+
+function renderPresence() {
+  const s = myPresence.state;
+  $('presenceState').textContent =
+    s === 'offline' ? 'Status: not clocked in'
+    : s === 'break' ? 'Status: on break (' + myPresence.reason + ')'
+    : myPresence.idle ? 'Status: working (idle)'
+    : 'Status: working';
+  $('clockInBtn').hidden = s !== 'offline';
+  $('clockOutBtn').hidden = s === 'offline';
+  $('breakBtn').hidden = s !== 'working';
+  $('backBtn').hidden = s !== 'break';
+  if (s !== 'working') $('breakForm').hidden = true;
+}
+
+const LOG_TEXT = {
+  clock_in: 'clocked in',
+  clock_out: 'clocked out',
+  break_start: 'started a break',
+  break_end: 'ended a break',
+  dropped: 'LEFT without clocking out',
+  returned: 'reconnected',
+};
+
+function renderLog(rows) {
+  const box = $('logList');
+  box.innerHTML = '';
+  if (!rows.length) {
+    box.textContent = 'No activity today.';
+    return;
+  }
+  rows.forEach((r) => {
+    const time = new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const line = document.createElement('div');
+    line.textContent = time + '  ' + r.name + ' ' + (LOG_TEXT[r.type] || r.type) + (r.note ? ' - ' + r.note : '');
+    box.appendChild(line);
+  });
+}
+
+// ---------- Panel ----------
 function setupPanel() {
   $('me').textContent = 'Logged in as ' + myName;
-  $('logoutBtn').onclick = logout;
+  $('logoutBtn').onclick = () => logout(false);
+
+  $('clockInBtn').onclick = () =>
+    socket.emit('clockIn', (res) => { if (res && res.error) showNotice(res.error); });
+  $('clockOutBtn').onclick = () => socket.emit('clockOut');
+  $('breakBtn').onclick = () => { $('breakForm').hidden = !$('breakForm').hidden; };
+  $('backBtn').onclick = () => socket.emit('endBreak');
+  $('breakForm').onsubmit = (e) => {
+    e.preventDefault();
+    const data = { reason: $('breakReason').value, minutes: Number($('breakMinutes').value) };
+    socket.emit('startBreak', data, (res) => {
+      if (res && res.error) return showNotice(res.error);
+      $('breakForm').hidden = true;
+    });
+  };
+
+  $('logBtn').onclick = () =>
+    socket.emit('getPresenceLog', (res) => {
+      if (res && res.error) return showNotice(res.error);
+      renderLog(res.rows);
+    });
 
   $('newMeetingBtn').onclick = () => {
     $('meetingForm').hidden = !$('meetingForm').hidden;
@@ -193,6 +324,7 @@ function setupPanel() {
   };
 
   $('endMeetingBtn').onclick = () => socket.emit('endMeeting');
+  renderPresence();
 }
 
 function renderInviteList() {
@@ -227,12 +359,12 @@ function renderMeetingStatus() {
   if (meetingLabel) meetingLabel.setText(meetingState.active ? 'Meeting Room [in session]' : 'Meeting Room');
 }
 
-function showNotice(text) {
+function showNotice(text, ms) {
   const el = $('notice');
   el.textContent = text;
   el.hidden = false;
   clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => { el.hidden = true; }, 5000);
+  noticeTimer = setTimeout(() => { el.hidden = true; }, ms || 5000);
 }
 
 // ---------- Video call (LiveKit) ----------
@@ -303,9 +435,12 @@ async function joinCall() {
 // ---------- Helpers ----------
 function addOther(scene, info) {
   if (scene.others[info.id]) return;
+  const label = makeLabel(scene, info.name).setPosition(info.x, info.y - 26);
+  applyLabel(label, info.name, info.presence);
   scene.others[info.id] = {
     img: scene.add.image(info.x, info.y, 'avatarOther'),
-    label: makeLabel(scene, info.name).setPosition(info.x, info.y - 26),
+    label,
+    name: info.name,
   };
 }
 

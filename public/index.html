@@ -27,6 +27,9 @@
       top: 12px;
       left: 12px;
       width: 240px;
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
+      box-sizing: border-box;
       padding: 12px;
       background: #1e293b;
       color: #e2e8f0;
@@ -43,14 +46,17 @@
       cursor: pointer;
     }
     #panel button.ghost { background: #475569; }
-    #panel input[type=text] {
+    #panel input[type=text], #panel select {
       width: 100%;
       box-sizing: border-box;
       margin-top: 8px;
       padding: 6px;
     }
-    #me { margin-bottom: 8px; color: #94a3b8; }
+    .section { margin-top: 12px; padding-top: 10px; border-top: 1px solid #334155; }
+    #me { margin-bottom: 4px; color: #94a3b8; }
     #inviteList label { display: block; margin: 4px 0; }
+    #logList { margin-top: 8px; max-height: 160px; overflow-y: auto; font-size: 12px; color: #cbd5e1; }
+    #logList div { margin: 3px 0; }
     #notice {
       position: fixed;
       bottom: 16px;
@@ -72,14 +78,46 @@
 
   <div id="panel">
     <div id="me"></div>
-    <div id="meetingStatus">Meeting Room: free</div>
-    <button id="newMeetingBtn" type="button">New meeting</button>
-    <button id="endMeetingBtn" type="button" hidden>End meeting</button>
-    <form id="meetingForm" hidden>
-      <input id="meetingTitle" type="text" placeholder="Meeting title" maxlength="40" autocomplete="off">
-      <div id="inviteList"></div>
-      <button type="submit">Create</button>
-    </form>
+
+    <div class="section" id="presenceBox">
+      <div id="presenceState">Status: not clocked in</div>
+      <button id="clockInBtn" type="button">Clock in</button>
+      <button id="clockOutBtn" type="button" hidden>Clock out</button>
+      <button id="breakBtn" type="button" class="ghost" hidden>Take a break</button>
+      <button id="backBtn" type="button" hidden>I'm back</button>
+      <form id="breakForm" hidden>
+        <select id="breakReason">
+          <option>Lunch</option>
+          <option>Short break</option>
+          <option>Meeting elsewhere</option>
+          <option>Personal</option>
+        </select>
+        <select id="breakMinutes">
+          <option value="5">5 minutes</option>
+          <option value="15">15 minutes</option>
+          <option value="30">30 minutes</option>
+          <option value="60">60 minutes</option>
+        </select>
+        <button type="submit">Start break</button>
+      </form>
+    </div>
+
+    <div class="section">
+      <div id="meetingStatus">Meeting Room: free</div>
+      <button id="newMeetingBtn" type="button">New meeting</button>
+      <button id="endMeetingBtn" type="button" hidden>End meeting</button>
+      <form id="meetingForm" hidden>
+        <input id="meetingTitle" type="text" placeholder="Meeting title" maxlength="40" autocomplete="off">
+        <div id="inviteList"></div>
+        <button type="submit">Create</button>
+      </form>
+    </div>
+
+    <div class="section" id="adminBox" hidden>
+      <button id="logBtn" type="button" class="ghost">Today's log (admin)</button>
+      <div id="logList"></div>
+    </div>
+
     <button id="logoutBtn" class="ghost" type="button">Log out</button>
   </div>
   <div id="notice" hidden></div>
