@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Virtual Office - Login</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0f172a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font: 15px sans-serif;
+      color: #e2e8f0;
+    }
+    .card { width: 320px; padding: 24px; background: #1e293b; border-radius: 12px; }
+    h1 { margin: 0 0 16px; font-size: 20px; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+      padding: 10px;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+    button.main {
+      width: 100%;
+      padding: 10px;
+      border: 0;
+      border-radius: 6px;
+      background: #4f46e5;
+      color: #fff;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    #switch { margin-top: 14px; text-align: center; color: #94a3b8; cursor: pointer; }
+    #error { min-height: 20px; margin-bottom: 8px; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="title">Log in to Virtual Office</h1>
+    <form id="form">
+      <input id="name" type="text" placeholder="Your name" maxlength="20" autocomplete="name" hidden>
+      <input id="email" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="password" type="password" placeholder="Password (min 8 characters)" autocomplete="current-password" required>
+      <div id="error"></div>
+      <button class="main" id="submitBtn" type="submit">Log in</button>
+    </form>
+    <div id="switch">New here? Create an account</div>
+  </div>
+
+  <script>
+    let mode = 'login';
+    const $ = (id) => document.getElementById(id);
+
+    $('switch').onclick = () => {
+      mode = mode === 'login' ? 'register' : 'login';
+      const isReg = mode === 'register';
+      $('name').hidden = !isReg;
+      $('name').required = isReg;
+      $('title').textContent = isReg ? 'Create your account' : 'Log in to Virtual Office';
+      $('submitBtn').textContent = isReg ? 'Sign up' : 'Log in';
+      $('switch').textContent = isReg ? 'Already have an account? Log in' : 'New here? Create an account';
+      $('error').textContent = '';
+    };
+
+    $('form').onsubmit = async (e) => {
+      e.preventDefault();
+      $('error').textContent = '';
+      $('submitBtn').disabled = true;
+      try {
+        const res = await fetch('/api/' + mode, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: $('name').value,
+            email: $('email').value,
+            password: $('password').value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          $('error').textContent = data.error || 'Something went wrong';
+          return;
+        }
+        // sessionStorage = har tab ka alag login (ek computer par 2 users test karne ke liye)
+        sessionStorage.setItem('vo_token', data.token);
+        sessionStorage.setItem('vo_name', data.user.name);
+        location.href = '/';
+      } catch (err) {
+        $('error').textContent = 'Could not reach the server';
+      } finally {
+        $('submitBtn').disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

@@ -9,14 +9,16 @@ const WALL = 10;
 const DOOR = 60;
 const SPEED = 200;
 
-// Testing ke liye: localhost:3000/?name=Ravi&cam=off&mic=off
+// Testing ke liye: localhost:3000/?cam=off&mic=off
 const params = new URLSearchParams(location.search);
 const WANT_CAM = params.get('cam') !== 'off';
 const WANT_MIC = params.get('mic') !== 'off';
-const myName =
-  (params.get('name') || prompt('Enter your name (shown above your avatar):') || 'Guest')
-    .trim()
-    .slice(0, 20) || 'Guest';
+
+// Login check: token nahi hai to login page par bhejo
+const token = sessionStorage.getItem('vo_token');
+const myName = sessionStorage.getItem('vo_name');
+const LOGGED_IN = Boolean(token && myName);
+if (!LOGGED_IN) location.replace('/login.html');
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,7 +39,12 @@ const config = {
   scene: { create, update },
 };
 
-new Phaser.Game(config);
+if (LOGGED_IN) new Phaser.Game(config);
+
+function logout() {
+  sessionStorage.clear();
+  location.replace('/login.html');
+}
 
 function create() {
   const scene = this;
@@ -53,7 +60,6 @@ function create() {
   this.walls.forEach((wall) => this.physics.add.collider(this.player, wall));
   this.myLabel = makeLabel(this, myName);
 
-  // false = browser ke typing ko rokna nahi (title likhte waqt space/letters chalein)
   this.keys = this.input.keyboard.addKeys(
     { up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT', w: 'W', a: 'A', s: 'S', d: 'D' },
     false
@@ -67,8 +73,13 @@ function create() {
   this.candidateCabin = null;
   this.candidateSince = 0;
 
-  // Socket yahin banta hai taaki koi event miss na ho
-  socket = io({ auth: { name: myName } });
+  // Ab socket token ke saath judta hai, server database se pehchanta hai
+  socket = io({ auth: { token } });
+
+  socket.on('connect_error', (err) => {
+    console.warn('Socket error:', err.message);
+    if (['no token', 'invalid token', 'user not found'].includes(err.message)) logout();
+  });
 
   socket.on('currentPlayers', (players) => {
     Object.keys(players).forEach((id) => {
@@ -103,7 +114,7 @@ function create() {
   });
   socket.on('meetingInvite', (inv) => {
     showNotice(inv.hostName + ' invited you to "' + inv.title + '". Walk into the Meeting Room to join.');
-    if (activeCabin === 'meeting') onCabinChange('meeting'); // pehle se andar khade the to dobara try
+    if (activeCabin === 'meeting') onCabinChange('meeting');
   });
   socket.on('meetingEnded', () => {
     showNotice('The meeting has ended.');
@@ -146,7 +157,6 @@ function update() {
     this.lastSent = { x, y };
   }
 
-  // 0.5 second ek hi jagah rukne par hi call badlo
   const insideId = inside ? inside.id : null;
   if (insideId !== this.candidateCabin) {
     this.candidateCabin = insideId;
@@ -159,6 +169,9 @@ function update() {
 
 // ---------- Meeting panel ----------
 function setupPanel() {
+  $('me').textContent = 'Logged in as ' + myName;
+  $('logoutBtn').onclick = logout;
+
   $('newMeetingBtn').onclick = () => {
     $('meetingForm').hidden = !$('meetingForm').hidden;
     renderInviteList();
@@ -175,7 +188,7 @@ function setupPanel() {
       showNotice('Meeting created. Invited people have been notified.');
       $('meetingForm').hidden = true;
       $('meetingTitle').value = '';
-      if (activeCabin === 'meeting') onCabinChange('meeting'); // host pehle se andar hai to join karao
+      if (activeCabin === 'meeting') onCabinChange('meeting');
     });
   };
 
@@ -199,7 +212,7 @@ function renderInviteList() {
     cb.value = p.id;
     cb.checked = checked.has(p.id);
     label.appendChild(cb);
-    label.appendChild(document.createTextNode(' ' + p.name)); // textNode: naam se HTML nahi chalega
+    label.appendChild(document.createTextNode(' ' + p.name));
     box.appendChild(label);
   });
 }

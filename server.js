@@ -2,13 +2,88 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!process.env.MONGODB_URI || !JWT_SECRET) {
+  console.error('Missing MONGODB_URI or JWT_SECRET in .env');
+  process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(express.json());
 app.use(express.static('public'));
 
+// ---------- Database ----------
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true, maxlength: 20 },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    passwordHash: { type: String, required: true },
+    role: { type: String, enum: ['admin', 'employee'], default: 'employee' },
+  },
+  { timestamps: true }
+);
+const User = mongoose.model('User', userSchema);
+
+function makeToken(user) {
+  return jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '8h' });
+}
+
+function authResponse(user) {
+  return { token: makeToken(user), user: { name: user.name, email: user.email, role: user.role } };
+}
+
+// ---------- Register / Login ----------
+app.post('/api/register', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 20);
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    if (await User.findOne({ email })) {
+      return res.status(409).json({ error: 'This email is already registered' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const isFirst = (await User.countDocuments()) === 0; // pehla user admin banta hai
+    const user = await User.create({ name, email, passwordHash, role: isFirst ? 'admin' : 'employee' });
+    res.json(authResponse(user));
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'This email is already registered' });
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    const user = await User.findOne({ email });
+    // Same message dono case mein, taaki koi ye na jaan sake ki email register hai ya nahi
+    const ok = user && (await bcrypt.compare(password, user.passwordHash));
+    if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
+    res.json(authResponse(user));
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+// ---------- Office ----------
 const CABINS = [
   { id: 'design',  x: 40,  y: 40 },
   { id: 'dev',     x: 290, y: 40 },
@@ -33,11 +108,6 @@ if (!process.env.LIVEKIT_URL || !process.env.LIVEKIT_API_KEY || !process.env.LIV
 const players = {};
 let meeting = null; // { title, hostId, invited: Set of socket ids }
 
-function cleanName(n) {
-  const s = typeof n === 'string' ? n.trim().slice(0, 20) : '';
-  return s || 'Guest';
-}
-
 function roster() {
   return Object.values(players).map((p) => ({ id: p.id, name: p.name }));
 }
@@ -53,12 +123,27 @@ function meetingStatus() {
   };
 }
 
+// Gate ka guard: socket tabhi judega jab valid token ho
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth && socket.handshake.auth.token;
+    if (!token) return next(new Error('no token'));
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(payload.sub);
+    if (!user) return next(new Error('user not found'));
+    socket.user = { id: user.id, name: user.name, role: user.role };
+    next();
+  } catch (err) {
+    next(new Error('invalid token'));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log('Connected:', socket.id);
+  console.log('Connected:', socket.user.name, socket.id);
 
   players[socket.id] = {
     id: socket.id,
-    name: cleanName(socket.handshake.auth && socket.handshake.auth.name),
+    name: socket.user.name, // naam ab database se aata hai, client se nahi
     x: 100 + Math.floor(Math.random() * 600),
     y: 420,
   };
@@ -77,7 +162,6 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('playerMoved', p);
   });
 
-  // Host guest list ke saath meeting banata hai
   socket.on('createMeeting', (data, callback) => {
     if (typeof callback !== 'function') return;
     const title = data && typeof data.title === 'string' ? data.title.trim().slice(0, 40) : '';
@@ -109,7 +193,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Cabin ke andar ho to video call ka pass do (meeting room mein guest list check)
   socket.on('joinCabinCall', async (callback) => {
     if (typeof callback !== 'function') return;
     try {
@@ -130,7 +213,7 @@ io.on('connection', (socket) => {
       const at = new AccessToken(
         process.env.LIVEKIT_API_KEY,
         process.env.LIVEKIT_API_SECRET,
-        { identity: socket.id, ttl: '10m' }
+        { identity: socket.id, name: socket.user.name, ttl: '10m' }
       );
       at.addGrant({ roomJoin: true, room: cabin.id, canPublish: true, canSubscribe: true });
       const token = await at.toJwt();
@@ -145,7 +228,7 @@ io.on('connection', (socket) => {
   socket.on('chat', (msg) => io.emit('chat', msg));
 
   socket.on('disconnect', () => {
-    console.log('Left:', socket.id);
+    console.log('Left:', socket.user.name, socket.id);
     delete players[socket.id];
     io.emit('playerLeft', socket.id);
     io.emit('roster', roster());
@@ -157,4 +240,14 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(3000, () => console.log('Running on http://localhost:3000'));
+// Pehle database jude, phir server chalu
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('MongoDB connected');
+    server.listen(3000, () => console.log('Running on http://localhost:3000'));
+  })
+  .catch((err) => {
+    console.error('MongoDB connection failed:', err.message);
+    process.exit(1);
+  });

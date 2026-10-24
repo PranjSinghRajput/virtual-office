@@ -42,12 +42,14 @@
       color: #fff;
       cursor: pointer;
     }
+    #panel button.ghost { background: #475569; }
     #panel input[type=text] {
       width: 100%;
       box-sizing: border-box;
       margin-top: 8px;
       padding: 6px;
     }
+    #me { margin-bottom: 8px; color: #94a3b8; }
     #inviteList label { display: block; margin: 4px 0; }
     #notice {
       position: fixed;
@@ -69,6 +71,7 @@
   <div id="call"></div>
 
   <div id="panel">
+    <div id="me"></div>
     <div id="meetingStatus">Meeting Room: free</div>
     <button id="newMeetingBtn" type="button">New meeting</button>
     <button id="endMeetingBtn" type="button" hidden>End meeting</button>
@@ -77,6 +80,7 @@
       <div id="inviteList"></div>
       <button type="submit">Create</button>
     </form>
+    <button id="logoutBtn" class="ghost" type="button">Log out</button>
   </div>
   <div id="notice" hidden></div>
 
